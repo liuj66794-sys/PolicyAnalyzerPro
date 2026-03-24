@@ -1,0 +1,37 @@
+﻿# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+venv/
+
+# Build outputs
+build/
+dist/
+*.spec
+
+# IDE
+.idea/
+.codex/
+.vscode/
+
+# Local runtime outputs
+exports/
+tmp/
+tests/_tmp*/
+deployment-diagnostic-*.md
+
+# Large local resources
+models/hfl/chinese-roberta-wwm-ext/
+assets/fonts/simhei.ttf
+tools/
+python313/
+.pip-cache/
+_wheel_probe/
+
+# Local experiments
+sample.txt
+test1.c

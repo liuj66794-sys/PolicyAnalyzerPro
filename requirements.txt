@@ -1,0 +1,11 @@
+﻿PySide6
+jieba
+sentence-transformers
+torch
+transformers
+PyInstaller
+python-docx
+pypdf
+PyMuPDF
+Pillow
+pytesseract
