@@ -1,4 +1,4 @@
-﻿﻿from __future__ import annotations
+from __future__ import annotations
 
 """Backward-compatible facade for the offline analysis engine.
 

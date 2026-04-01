@@ -124,6 +124,11 @@ class AppConfig:
     app_name: str = "PolicyAnalyzerPro"
     analysis_mode: str = "offline"
     policy_source_enabled: bool = False
+    policy_source_registry_path: str = "config/policy_sources.json"
+    policy_repository_dir: str = "data/policy_repository"
+    policy_fetch_executor_workers: int = 2
+    policy_fetch_default_timeout_sec: int = 20
+    policy_fetch_default_retry_times: int = 2
     llm_provider: str = ""
     remote_llm_enabled: bool = False
     hybrid_mode_enabled: bool = False
@@ -186,14 +191,20 @@ class AppConfig:
         self.analysis_mode = normalized_mode
 
         self.policy_source_enabled = bool(self.policy_source_enabled)
+        self.policy_source_registry_path = str(
+            self.policy_source_registry_path or "config/policy_sources.json"
+        ).strip()
+        self.policy_repository_dir = str(
+            self.policy_repository_dir or "data/policy_repository"
+        ).strip()
+        self.policy_fetch_executor_workers = max(1, int(self.policy_fetch_executor_workers or 1))
+        self.policy_fetch_default_timeout_sec = max(1, int(self.policy_fetch_default_timeout_sec or 20))
+        self.policy_fetch_default_retry_times = max(0, int(self.policy_fetch_default_retry_times or 0))
         self.llm_provider = str(self.llm_provider or "").strip()
         self.remote_llm_enabled = bool(self.remote_llm_enabled)
         self.hybrid_mode_enabled = bool(self.hybrid_mode_enabled)
         self.cloud_fallback_enabled = bool(self.cloud_fallback_enabled)
 
-        # Legacy compatibility: old configs only had `cloud_fallback_enabled`.
-        # If the new remote switches are both still false, treat the legacy flag
-        # as a backfill for both online and hybrid capability switches.
         if (
             self.cloud_fallback_enabled
             and not self.remote_llm_enabled
@@ -235,6 +246,14 @@ class AppConfig:
     @property
     def resolved_ocr_cache_dir(self) -> str:
         return get_resource_path(self.ocr_cache_dir)
+
+    @property
+    def resolved_policy_source_registry_path(self) -> str:
+        return get_resource_path(self.policy_source_registry_path)
+
+    @property
+    def resolved_policy_repository_dir(self) -> str:
+        return get_resource_path(self.policy_repository_dir)
 
     @classmethod
     def from_json(cls, json_path: str | Path) -> "AppConfig":
