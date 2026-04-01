@@ -113,9 +113,35 @@ class DocumentLoader:
         pdf_options: PdfImportOptions | None = None,
     ) -> str:
         self.reset_last_load_state()
+        
+        # 增强输入验证
+        if path is None or (isinstance(path, str) and not path.strip()):
+            raise DocumentImportError("\u6587\u6863\u8def\u5f84\u4e0d\u80fd\u4e3a\u7a7a")
+        
         file_path = Path(path)
+        
+        # 验证文件路径安全性
+        try:
+            # 解析路径，防止路径遍历攻击
+            file_path = file_path.resolve(strict=True)
+        except Exception as exc:
+            raise DocumentImportError(f"\u6587\u6863\u8def\u5f84\u89e3\u6790\u5931\u8d25\uff1a{exc}")
+        
         if not file_path.exists():
             raise DocumentImportError(f"\u6587\u6863\u4e0d\u5b58\u5728\uff1a{file_path}")
+        
+        if not file_path.is_file():
+            raise DocumentImportError(f"\u6307\u5b9a\u7684\u8def\u5f84\u4e0d\u662f\u4e00\u4e2a\u6587\u4ef6\uff1a{file_path}")
+
+        # 检查文件大小，防止处理过大的文件
+        try:
+            file_size = file_path.stat().st_size
+            max_size = getattr(self.config, "max_file_size", 50 * 1024 * 1024)  # 默认50MB
+            if file_size > max_size:
+                raise DocumentImportError(f"\u6587\u6863\u5927\u5c0f\u8d85\u8fc7\u6700\u5927\u9650\u5236\uff0c\u6700\u5927\u6587\u6863\u5927\u5c0f\u4e3a{max_size / (1024 * 1024):.1f}MB")
+        except Exception as exc:
+            # 文件大小检查失败，继续处理，但记录警告
+            pass
 
         suffix = file_path.suffix.lower()
         if suffix in self.TEXT_SUFFIXES:

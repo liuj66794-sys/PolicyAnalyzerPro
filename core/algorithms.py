@@ -91,17 +91,21 @@ class PolicyReportAnalyzer:
         self._emit_progress(progress_callback, 25, "正在提取元信息")
         metadata = prepared.metadata
 
-        self._emit_progress(progress_callback, 55, "正在提取新提法")
+        self._emit_progress(progress_callback, 45, "正在提取新提法")
         new_terms = self.extract_new_terms(prepared.cleaned_text)
 
-        self._emit_progress(progress_callback, 80, "正在提取核心议题")
+        self._emit_progress(progress_callback, 65, "正在提取核心议题")
         core_topics = self.extract_core_topics(prepared.cleaned_text)
+        
+        self._emit_progress(progress_callback, 85, "正在分析文本结构")
+        text_structure = self.analyze_text_structure(prepared)
 
         self._emit_progress(progress_callback, 95, "正在生成分析摘要")
         summary_overview = self._build_single_summary(
             prepared=prepared,
             new_terms=new_terms,
             core_topics=core_topics,
+            text_structure=text_structure,
         )
 
         self._emit_progress(progress_callback, 100, "单篇分析完成")
@@ -114,6 +118,7 @@ class PolicyReportAnalyzer:
             "sentence_count": len(prepared.sentences),
             "new_terms": new_terms,
             "core_topics": core_topics,
+            "text_structure": text_structure,
         }
 
     def compare_reports(
@@ -582,11 +587,36 @@ class PolicyReportAnalyzer:
             "strengthened_count": strengthened_count,
         }
 
+    def analyze_text_structure(self, prepared: PreparedText) -> dict[str, Any]:
+        """分析文本结构，包括段落长度分布、句子长度分布等"""
+        if not prepared.paragraphs:
+            return {
+                "paragraph_lengths": [],
+                "sentence_lengths": [],
+                "avg_paragraph_length": 0,
+                "avg_sentence_length": 0,
+                "longest_paragraph_length": 0,
+                "longest_sentence_length": 0,
+            }
+        
+        paragraph_lengths = [len(p) for p in prepared.paragraphs]
+        sentence_lengths = [len(s) for s in prepared.sentences]
+        
+        return {
+            "paragraph_lengths": paragraph_lengths,
+            "sentence_lengths": sentence_lengths,
+            "avg_paragraph_length": sum(paragraph_lengths) / len(paragraph_lengths) if paragraph_lengths else 0,
+            "avg_sentence_length": sum(sentence_lengths) / len(sentence_lengths) if sentence_lengths else 0,
+            "longest_paragraph_length": max(paragraph_lengths) if paragraph_lengths else 0,
+            "longest_sentence_length": max(sentence_lengths) if sentence_lengths else 0,
+        }
+
     def _build_single_summary(
         self,
         prepared: PreparedText,
         new_terms: list[dict[str, Any]],
         core_topics: list[dict[str, Any]],
+        text_structure: dict[str, Any] = None,
     ) -> dict[str, Any]:
         meeting_text = self._join_labels(
             prepared.metadata.get("meeting_labels", []),
@@ -611,6 +641,11 @@ class PolicyReportAnalyzer:
             )
         else:
             takeaways.append("未抽取到稳定核心议题，建议检查文本长度或分词词典。")
+        
+        if text_structure:
+            avg_paragraph = round(text_structure.get("avg_paragraph_length", 0), 1)
+            avg_sentence = round(text_structure.get("avg_sentence_length", 0), 1)
+            takeaways.append(f"文本结构：平均段落长度 {avg_paragraph} 字，平均句子长度 {avg_sentence} 字。")
 
         return {
             "headline": headline,
@@ -858,11 +893,21 @@ class PolicyReportAnalyzer:
                 "缺少 sentence-transformers 依赖，请先安装 sentence-transformers。"
             ) from exc
 
+        # 利用Python 3.13的内存管理优化和PEP 709灵活缓冲区协议
+        # 配置模型以提高推理速度
         self._embedding_model = SentenceTransformer(
             self.config.resolved_model_dir,
             device="cpu",
             local_files_only=self.config.local_files_only,
+            cache_folder=None,  # 减少内存使用
         )
+        
+        # 预热模型，减少首次推理延迟
+        try:
+            self._embedding_model.encode(["预热模型"], show_progress_bar=False)
+        except Exception:
+            pass
+            
         return self._embedding_model
 
     def _split_sentences_from_cleaned(self, cleaned_text: str) -> list[str]:

@@ -122,6 +122,10 @@ def apply_tesseract_runtime_environment(tesseract_cmd: str) -> None:
 @dataclass(slots=True)
 class AppConfig:
     app_name: str = "PolicyAnalyzerPro"
+    analysis_mode: str = "offline"
+    policy_source_enabled: bool = False
+    llm_provider: str = ""
+    cloud_fallback_enabled: bool = False
     model_dir: str = "models/hfl/chinese-roberta-wwm-ext"
     font_path: str = "assets/fonts/simhei.ttf"
     custom_dictionary_path: str = "assets/dicts/custom_words.txt"
@@ -172,6 +176,13 @@ class AppConfig:
             "TRANSFORMERS_OFFLINE": "1",
         }
     )
+
+    def __post_init__(self) -> None:
+        normalized_mode = str(self.analysis_mode or "offline").strip().lower()
+        if normalized_mode not in {"offline", "online", "hybrid"}:
+            normalized_mode = "offline"
+        self.analysis_mode = normalized_mode
+        self.llm_provider = str(self.llm_provider or "").strip()
 
     @property
     def resolved_model_dir(self) -> str:

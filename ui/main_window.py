@@ -9,6 +9,7 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -33,6 +34,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.analysis_router import (
+    ANALYSIS_MODE_HYBRID as ROUTE_MODE_HYBRID,
+    ANALYSIS_MODE_OFFLINE as ROUTE_MODE_OFFLINE,
+    ANALYSIS_MODE_ONLINE as ROUTE_MODE_ONLINE,
+    build_analysis_route_text,
+    build_capability_snapshot,
+    get_analysis_mode_label,
+    resolve_analysis_route,
+)
 from core.config import AppConfig, DEFAULT_CONFIG
 from core.import_preview import (
     ImportPreviewState,
@@ -246,12 +256,21 @@ class MainWindow(QMainWindow):
         self._batch_documents: list[dict[str, Any]] = []
         self._result_formatter = AnalysisResultFormatter()
         self._document_loader = DocumentLoader(self.config)
+        self._analysis_capabilities = build_capability_snapshot(self.config, self._startup_report)
         self._last_pdf_ocr_page_spec = ""
         self._last_pdf_use_cache = bool(getattr(self.config, "enable_ocr_result_cache", True))
 
         self.setWindowTitle("PolicyAnalyzerPro - 中国政策报告智能分析引擎")
-        self.resize(1280, 860)
-        self.setMinimumSize(1040, 720)
+        self.resize(1366, 768)
+        self.setMinimumSize(1040, 600)
+        # 添加窗口图标
+        try:
+            from PySide6.QtGui import QIcon
+            icon_path = "assets/icons/app_icon.png"
+            if Path(icon_path).exists():
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
         self.setStatusBar(QStatusBar(self))
 
         self._build_ui()
@@ -259,6 +278,7 @@ class MainWindow(QMainWindow):
         self._set_busy_state(False)
         self._update_export_state()
         self._update_environment_status()
+        self._update_analysis_route_status()
         self._show_welcome_message()
 
     def _build_ui(self) -> None:
@@ -294,7 +314,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-size: 24px; font-weight: 700;")
 
         subtitle = QLabel(
-            "完全离线运行，支持 TXT / DOCX / PDF 导入、双篇演变分析与正式报告导出。",
+            "离线优先运行，支持 TXT / DOCX / PDF 导入、离线 / 在线 / 混合模式切换与正式报告导出。",
             container,
         )
         subtitle.setStyleSheet("color: #4b5563; font-size: 13px;")
@@ -349,8 +369,49 @@ class MainWindow(QMainWindow):
         performance_row.addWidget(self.environment_performance_badge)
         performance_row.addWidget(self.environment_performance_label, 1)
 
+        analysis_row = QHBoxLayout()
+        analysis_row.setContentsMargins(0, 0, 0, 0)
+        analysis_row.setSpacing(8)
+
+        analysis_mode_title = QLabel("\u5206\u6790\u6a21\u5f0f", container)
+        analysis_mode_title.setStyleSheet("color: #344054; font-size: 12px; font-weight: 700;")
+
+        self.analysis_mode_combo = QComboBox(container)
+        self.analysis_mode_combo.addItem("\u79bb\u7ebf\u5206\u6790\uff08\u9ed8\u8ba4\uff09", ROUTE_MODE_OFFLINE)
+        self.analysis_mode_combo.addItem("\u5728\u7ebf\u5206\u6790", ROUTE_MODE_ONLINE)
+        self.analysis_mode_combo.addItem("\u6df7\u5408\u5206\u6790", ROUTE_MODE_HYBRID)
+        self.analysis_mode_combo.setMinimumWidth(160)
+
+        self.online_status_badge = QLabel(container)
+        self.online_status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.online_status_badge.setMinimumWidth(82)
+        self.online_status_badge.setStyleSheet(
+            "font-size: 11px; font-weight: 700; border-radius: 10px; padding: 4px 8px;"
+        )
+
+        self.analysis_mode_label = QLabel(container)
+        self.analysis_mode_label.setWordWrap(True)
+        self.analysis_mode_label.setStyleSheet("color: #475467; font-size: 12px;")
+
+        # 依赖状态徽章（可点击）
+        self.dependency_status_badge = ClickableBadgeLabel(container)
+        self.dependency_status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.dependency_status_badge.setMinimumWidth(82)
+        self.dependency_status_badge.setStyleSheet(
+            "font-size: 11px; font-weight: 700; border-radius: 10px; padding: 4px 8px;"
+        )
+        self.dependency_status_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.dependency_status_badge.setToolTip("点击打开环境自检向导查看依赖详情")
+
+        analysis_row.addWidget(analysis_mode_title)
+        analysis_row.addWidget(self.analysis_mode_combo, 0)
+        analysis_row.addWidget(self.online_status_badge, 0)
+        analysis_row.addWidget(self.dependency_status_badge, 0)
+        analysis_row.addWidget(self.analysis_mode_label, 1)
+
         status_column.addLayout(status_row)
         status_column.addWidget(self.environment_helper_label)
+        status_column.addLayout(analysis_row)
         status_column.addLayout(performance_row)
         top_row.addLayout(status_column)
 
@@ -588,6 +649,8 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.environment_check_button.clicked.connect(self._show_environment_check_dialog)
+        self.dependency_status_badge.clicked.connect(self._show_environment_check_dialog)
+        self.analysis_mode_combo.currentIndexChanged.connect(self._on_analysis_mode_changed)
         self.preview_hint_badge.clicked.connect(self._toggle_preview_hint_popover)
         self.preview_hint_popover.copy_clicked.connect(self._copy_preview_hint_report)
         self.preview_hint_popover.insert_clicked.connect(self._insert_preview_hint_report)
@@ -633,7 +696,7 @@ class MainWindow(QMainWindow):
     def _show_welcome_message(self) -> None:
         self.result_view.setMarkdown(
             "# 欢迎使用 PolicyAnalyzerPro\n\n"
-            "- 完全离线运行，不依赖联网服务。\n"
+            "- 离线优先运行，默认不依赖联网服务。\n"
             "- 支持单篇分析、双篇政策演变比对和批量分析。\n"
             "- 可导入 TXT / DOCX / PDF，扫描版 PDF 支持 OCR。\n"
             "- 可导出 Markdown / HTML / JSON 分析结果。\n"
@@ -707,6 +770,75 @@ class MainWindow(QMainWindow):
         self.environment_performance_label.setToolTip(tooltip)
         self.environment_performance_badge.setToolTip(tooltip)
 
+    def _on_analysis_mode_changed(self) -> None:
+        selected_mode = str(self.analysis_mode_combo.currentData() or ROUTE_MODE_OFFLINE)
+        self.config = self.config.merge({"analysis_mode": selected_mode})
+        self._update_analysis_route_status()
+        self.statusBar().showMessage(f"\u5df2\u5207\u6362\u5230{get_analysis_mode_label(selected_mode)}\u3002", 4000)
+
+    def _update_analysis_route_status(self) -> None:
+        self._analysis_capabilities = build_capability_snapshot(self.config, self._startup_report)
+        selected_mode = str(self.config.analysis_mode or ROUTE_MODE_OFFLINE)
+
+        combo_index = self.analysis_mode_combo.findData(selected_mode)
+        if combo_index >= 0 and combo_index != self.analysis_mode_combo.currentIndex():
+            self.analysis_mode_combo.blockSignals(True)
+            self.analysis_mode_combo.setCurrentIndex(combo_index)
+            self.analysis_mode_combo.blockSignals(False)
+
+        decision = resolve_analysis_route(selected_mode, config=self.config, startup_report=self._startup_report)
+        preview_result = {
+            "requested_analysis_mode": decision.requested_mode,
+            "executed_analysis_mode": decision.executed_mode,
+        }
+        route_text = build_analysis_route_text(preview_result)
+        detail_parts = [route_text, decision.message]
+        if decision.warnings:
+            detail_parts.append(decision.warnings[0])
+        self.analysis_mode_label.setText(" ".join(part for part in detail_parts if part))
+
+        state = self._analysis_capabilities.online_state
+        summary = self._analysis_capabilities.online_summary
+        if state == "ready":
+            badge_text = "\u5728\u7ebf\u5c31\u7eea"
+            badge_style = "background: #ecfdf3; color: #027a48; border: 1px solid #abefc6;"
+        elif state == "skeleton":
+            badge_text = "\u9aa8\u67b6\u5c31\u4f4d"
+            badge_style = "background: #eff8ff; color: #175cd3; border: 1px solid #b2ddff;"
+        elif state == "unconfigured":
+            badge_text = "\u5f85\u914d\u7f6e"
+            badge_style = "background: #fffaeb; color: #b54708; border: 1px solid #fedf89;"
+        else:
+            badge_text = "\u5728\u7ebf\u5173\u95ed"
+            badge_style = "background: #f2f4f7; color: #344054; border: 1px solid #d0d5dd;"
+
+        self.online_status_badge.setText(badge_text)
+        self.online_status_badge.setToolTip(summary)
+        self.online_status_badge.setStyleSheet(
+            "font-size: 11px; font-weight: 700; border-radius: 10px; padding: 4px 8px; " + badge_style
+        )
+
+        # 更新依赖状态徽章
+        dep_status = self._analysis_capabilities.dependency_status
+        if dep_status == "ok":
+            dep_badge_text = "环境正常"
+            dep_badge_style = "background: #ecfdf3; color: #027a48; border: 1px solid #abefc6;"
+            dep_tooltip = "所有依赖检查通过，环境就绪"
+        elif dep_status == "warning":
+            dep_badge_text = "依赖警告"
+            dep_badge_style = "background: #fffaeb; color: #b54708; border: 1px solid #fedf89;"
+            dep_tooltip = "存在依赖警告，建议检查环境"
+        else:
+            dep_badge_text = "依赖缺失"
+            dep_badge_style = "background: #fef3f2; color: #b42318; border: 1px solid #fecdca;"
+            dep_tooltip = "存在关键依赖缺失，点击打开环境自检向导"
+
+        self.dependency_status_badge.setText(dep_badge_text)
+        self.dependency_status_badge.setToolTip(dep_tooltip)
+        self.dependency_status_badge.setStyleSheet(
+            "font-size: 11px; font-weight: 700; border-radius: 10px; padding: 4px 8px; " + dep_badge_style
+        )
+
     def _show_environment_check_dialog(self) -> None:
         dialog = StartupWizardDialog(
             config=self.config,
@@ -716,6 +848,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
         self._startup_report = dialog.report
         self._update_environment_status()
+        self._update_analysis_route_status()
         if self._startup_report.has_critical_issues:
             self.statusBar().showMessage("环境中仍存在关键部署问题，请按向导提示修复。", 8000)
         elif self._startup_report.warning_count > 0:
@@ -1102,6 +1235,7 @@ class MainWindow(QMainWindow):
             config=self.config,
             parent=self,
             batch_inputs=batch_inputs,
+            analysis_mode=self.config.analysis_mode,
         )
         self._analysis_thread.progress_changed.connect(self._on_progress_changed)
         self._analysis_thread.status_changed.connect(self._on_status_changed)
@@ -1130,11 +1264,16 @@ class MainWindow(QMainWindow):
 
     def _on_result_ready(self, result: dict) -> None:
         self._last_result = result
+        route_message = str(result.get("analysis_route_message", "") or "").strip()
+        route_text = build_analysis_route_text(result)
         if self._inserted_preview_hint_notes:
             self._last_result["import_preview_notes"] = list(self._inserted_preview_hint_notes)
         self._refresh_result_view()
         self.output_tab_widget.setCurrentIndex(0)
         self.progress_bar.setValue(100)
+        if route_message:
+            self.status_label.setText(route_message)
+            self.statusBar().showMessage(f"{route_text} {route_message}", 6000)
         self._update_export_state()
 
     def _on_error_occurred(self, message: str) -> None:

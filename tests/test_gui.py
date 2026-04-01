@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from core.analysis_router import ANALYSIS_MODE_ONLINE as ROUTE_MODE_ONLINE
 from core.config import load_app_config
 from core.nlp_thread import ANALYSIS_MODE_BATCH, ANALYSIS_MODE_SINGLE
 from core.startup_checks import DeploymentCheck, StartupCheckReport
@@ -35,8 +36,9 @@ class _FakeSignal:
 class FakeAnalysisThread:
     created: list["FakeAnalysisThread"] = []
 
-    def __init__(self, mode, primary_text, secondary_text="", config=None, parent=None, batch_inputs=None) -> None:
+    def __init__(self, mode, primary_text, secondary_text="", config=None, parent=None, batch_inputs=None, analysis_mode="offline") -> None:
         self.mode = mode
+        self.analysis_mode = analysis_mode
         self.primary_text = primary_text
         self.secondary_text = secondary_text
         self.batch_inputs = copy.deepcopy(batch_inputs or [])
@@ -89,6 +91,9 @@ class FakeAnalysisThread:
                 )
             return {
                 "mode": "batch",
+                "requested_analysis_mode": self.analysis_mode,
+                "executed_analysis_mode": self.analysis_mode,
+                "analysis_route_message": f"fake-{self.analysis_mode}-completed",
                 "total_documents": len(documents),
                 "total_paragraphs": sum(item["analysis"]["paragraph_count"] for item in documents),
                 "total_sentences": sum(item["analysis"]["sentence_count"] for item in documents),
@@ -103,6 +108,9 @@ class FakeAnalysisThread:
 
         return {
             "mode": "single",
+            "requested_analysis_mode": self.analysis_mode,
+            "executed_analysis_mode": self.analysis_mode,
+            "analysis_route_message": f"fake-{self.analysis_mode}-completed",
             "metadata": {"meeting_labels": ["\u5341\u56db\u5c4a\u5168\u56fd\u4eba\u5927\u4e09\u6b21\u4f1a\u8bae"], "years": ["2025\u5e74"]},
             "summary_overview": {
                 "headline": "\u5355\u7bc7\u5206\u6790\u5df2\u5b8c\u6210\u3002",
@@ -171,6 +179,26 @@ class GuiInteractionTests(unittest.TestCase):
         self.assertEqual(thread.primary_text, sample_text)
         self.assertIn(expected_heading, self.window.result_view.toPlainText())
         self.assertTrue(self.window.export_markdown_button.isEnabled())
+
+    def test_mode_switch_passes_selected_analysis_mode(self) -> None:
+        sample_text = "\u653f\u7b56\u6587\u672c"
+        online_index = self.window.analysis_mode_combo.findData(ROUTE_MODE_ONLINE)
+        self.assertGreaterEqual(online_index, 0)
+        self.window.analysis_mode_combo.setCurrentIndex(online_index)
+        self.app.processEvents()
+
+        self.assertEqual(self.window.config.analysis_mode, ROUTE_MODE_ONLINE)
+        self.assertIn("\u5206\u6790\u6a21\u5f0f", self.window.analysis_mode_label.text())
+        self.assertEqual(self.window.online_status_badge.text(), "\u5728\u7ebf\u5173\u95ed")
+
+        self.window.single_input.setPlainText(sample_text)
+        with patch("ui.main_window.NLPAnalysisThread", FakeAnalysisThread):
+            self.window.single_run_button.click()
+            self.app.processEvents()
+
+        self.assertTrue(FakeAnalysisThread.created)
+        thread = FakeAnalysisThread.created[-1]
+        self.assertEqual(thread.analysis_mode, ROUTE_MODE_ONLINE)
 
     def test_batch_import_run_and_remove_flow(self) -> None:
         temp_dir = self._create_temp_dir()

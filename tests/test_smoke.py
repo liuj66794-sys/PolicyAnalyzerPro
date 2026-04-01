@@ -90,6 +90,10 @@ class SmokeTests(unittest.TestCase):
     def test_load_app_config(self) -> None:
         config = load_app_config()
         self.assertEqual(config.app_name, "PolicyAnalyzerPro")
+        self.assertEqual(config.analysis_mode, "offline")
+        self.assertFalse(config.policy_source_enabled)
+        self.assertEqual(config.llm_provider, "")
+        self.assertFalse(config.cloud_fallback_enabled)
         self.assertEqual(config.process_pool_workers, 1)
         self.assertEqual(config.offline_env["HF_HUB_OFFLINE"], "1")
         self.assertTrue(config.enable_pdf_ocr)
@@ -111,6 +115,19 @@ class SmokeTests(unittest.TestCase):
         analyzer = PolicyReportAnalyzer()
         prepared = analyzer.prepare_text("十四届全国人大二次会议政府工作报告。")
         self.assertIn("十四届全国人大二次会议", prepared.metadata["meeting_labels"])
+
+    def test_analyze_text_structure(self) -> None:
+        analyzer = PolicyReportAnalyzer()
+        text = "第一段内容。\n\n第二段内容，这是一个更长的段落，包含更多的文字。\n\n第三段内容。"
+        prepared = analyzer.prepare_text(text)
+        structure = analyzer.analyze_text_structure(prepared)
+        
+        self.assertEqual(len(structure["paragraph_lengths"]), 3)
+        self.assertEqual(len(structure["sentence_lengths"]), 3)
+        self.assertGreater(structure["avg_paragraph_length"], 0)
+        self.assertGreater(structure["avg_sentence_length"], 0)
+        self.assertGreater(structure["longest_paragraph_length"], 0)
+        self.assertGreater(structure["longest_sentence_length"], 0)
 
     def test_document_loader_reads_text_file(self) -> None:
         loader = DocumentLoader()

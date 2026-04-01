@@ -5,6 +5,8 @@ from datetime import datetime
 from html import escape
 from typing import Any
 
+from core.analysis_router import build_analysis_route_text, get_analysis_mode_label
+
 
 class AnalysisResultFormatter:
     def to_markdown(self, result: dict[str, Any]) -> str:
@@ -56,6 +58,7 @@ class AnalysisResultFormatter:
         years = metadata.get("years", []) or ["未识别"]
         new_terms = result.get("new_terms", [])
         topics = result.get("core_topics", [])
+        text_structure = result.get("text_structure", {})
 
         sections = [
             "# 单篇分析结果",
@@ -65,10 +68,20 @@ class AnalysisResultFormatter:
             f"- 会议规格：{'、'.join(meetings)}",
             f"- 年份：{'、'.join(years)}",
             f"- 文本规模：{result.get('paragraph_count', 0)} 段，{result.get('sentence_count', 0)} 句",
+            *self._format_analysis_route_markdown(result),
             "",
             "### 关键观察",
         ]
         sections.extend(self._format_bullets(summary.get("key_takeaways", []), "本篇文本暂无额外关键信号。"))
+        
+        if text_structure:
+            sections.append("")
+            sections.append("## 文本结构分析")
+            sections.append(f"- 平均段落长度：{round(text_structure.get('avg_paragraph_length', 0), 1)} 字")
+            sections.append(f"- 平均句子长度：{round(text_structure.get('avg_sentence_length', 0), 1)} 字")
+            sections.append(f"- 最长段落长度：{text_structure.get('longest_paragraph_length', 0)} 字")
+            sections.append(f"- 最长句子长度：{text_structure.get('longest_sentence_length', 0)} 字")
+        
         sections.append("")
         sections.append("## 新提法 Top 10")
         sections.extend(self._format_weighted_items(new_terms, "term", "未提取到明显新提法。"))
@@ -96,6 +109,7 @@ class AnalysisResultFormatter:
             f"- 总体信号等级：{summary.get('signal_level', '低')}",
             f"- 总体信号分值：{summary.get('signal_score', 0.0)} / 100",
             f"- 核心结论：{summary.get('headline', '本轮对比已完成。')}",
+            *self._format_analysis_route_markdown(result),
             "",
             "### 关键发现",
         ]
@@ -155,6 +169,7 @@ class AnalysisResultFormatter:
             f"- 总段落数：{result.get('total_paragraphs', 0)}",
             f"- 总句子数：{result.get('total_sentences', 0)}",
             f"- 结论摘要：{summary.get('headline', '批量分析已完成。')}",
+            *self._format_analysis_route_markdown(result),
             "",
             "### 关键发现",
         ]
@@ -214,30 +229,67 @@ class AnalysisResultFormatter:
     def _format_single_html(self, result: dict[str, Any], rendered_at: str) -> str:
         summary = result.get("summary_overview", {})
         metadata = result.get("metadata", {})
+        text_structure = result.get("text_structure", {})
+        
+        metric_cards = [
+            ("会议规格", self._join_or_default(metadata.get("meeting_labels"))),
+            ("年份", self._join_or_default(metadata.get("years"))),
+            ("段落数", str(result.get("paragraph_count", 0))),
+            ("句子数", str(result.get("sentence_count", 0))),
+        ]
+        
+        if text_structure:
+            metric_cards.extend([
+                ("平均段落长度", f"{round(text_structure.get('avg_paragraph_length', 0), 1)} 字"),
+                ("平均句子长度", f"{round(text_structure.get('avg_sentence_length', 0), 1)} 字"),
+            ])
+        
+        evidence_sections = [
+            self._build_html_weighted_section("新提法 Top 10", result.get("new_terms", []), "term", "未提取到明显新提法。"),
+            self._build_html_weighted_section("核心议题 Top 10", result.get("core_topics", []), "topic", "未提取到核心议题。"),
+        ]
+        
+        if text_structure:
+            structure_html = """
+            <section class="panel">
+                <h3>文本结构分析</h3>
+                <table class="report-table">
+                    <thead><tr><th>指标</th><th>值</th></tr></thead>
+                    <tbody>
+                        <tr><td>平均段落长度</td><td>{avg_paragraph} 字</td></tr>
+                        <tr><td>平均句子长度</td><td>{avg_sentence} 字</td></tr>
+                        <tr><td>最长段落长度</td><td>{max_paragraph} 字</td></tr>
+                        <tr><td>最长句子长度</td><td>{max_sentence} 字</td></tr>
+                    </tbody>
+                </table>
+            </section>
+            """
+            structure_html = structure_html.format(
+                avg_paragraph=round(text_structure.get('avg_paragraph_length', 0), 1),
+                avg_sentence=round(text_structure.get('avg_sentence_length', 0), 1),
+                max_paragraph=text_structure.get('longest_paragraph_length', 0),
+                max_sentence=text_structure.get('longest_sentence_length', 0),
+            )
+            evidence_sections.insert(0, structure_html)
+        
         return (
             self._build_cover_page(
                 title="单篇分析报告",
                 subtitle=summary.get("headline", "本次分析已完成。"),
                 rendered_at=rendered_at,
                 badge_label="离线分析",
+                run_mode_label=get_analysis_mode_label(result.get("executed_analysis_mode")),
             )
             + self._build_page(
                 "执行摘要",
-                self._build_html_findings("关键观察", summary.get("key_takeaways", []), "本篇文本暂无额外关键信号。")
-                + self._build_html_metric_cards(
-                    [
-                        ("会议规格", self._join_or_default(metadata.get("meeting_labels"))),
-                        ("年份", self._join_or_default(metadata.get("years"))),
-                        ("段落数", str(result.get("paragraph_count", 0))),
-                        ("句子数", str(result.get("sentence_count", 0))),
-                    ]
-                ),
+                self._build_html_route_panel(result)
+                + self._build_html_findings("关键观察", summary.get("key_takeaways", []), "本篇文本暂无额外关键信号。")
+                + self._build_html_metric_cards(metric_cards),
                 page_class="summary-page",
             )
             + self._build_page(
                 "证据页",
-                self._build_html_weighted_section("新提法 Top 10", result.get("new_terms", []), "term", "未提取到明显新提法。")
-                + self._build_html_weighted_section("核心议题 Top 10", result.get("core_topics", []), "topic", "未提取到核心议题。"),
+                "".join(evidence_sections),
             )
             + self._build_html_import_preview_notes_page(result.get("import_preview_notes", []))
         )
@@ -256,10 +308,12 @@ class AnalysisResultFormatter:
                 subtitle=summary.get("headline", "本轮对比已完成。"),
                 rendered_at=rendered_at,
                 badge_label=f"总体信号 {summary.get('signal_level', '低')}",
+                run_mode_label=get_analysis_mode_label(result.get("executed_analysis_mode")),
             )
             + self._build_page(
                 "执行摘要",
-                self._build_html_metric_cards(
+                self._build_html_route_panel(result)
+                + self._build_html_metric_cards(
                     [
                         ("总体信号等级", str(summary.get("signal_level", "低"))),
                         ("总体信号分值", f"{summary.get('signal_score', 0.0)} / 100"),
@@ -306,10 +360,12 @@ class AnalysisResultFormatter:
                 subtitle=summary.get("headline", "批量分析已完成。"),
                 rendered_at=rendered_at,
                 badge_label=f"批量文档 {result.get('total_documents', len(documents))} 份",
+                run_mode_label=get_analysis_mode_label(result.get("executed_analysis_mode")),
             )
             + self._build_page(
                 "执行摘要",
-                self._build_html_metric_cards(
+                self._build_html_route_panel(result)
+                + self._build_html_metric_cards(
                     [
                         ("批量文档数", str(result.get("total_documents", len(documents)))),
                         ("总段落数", str(result.get("total_paragraphs", 0))),
@@ -373,7 +429,7 @@ class AnalysisResultFormatter:
         for index, pair in enumerate(pairs[:5], start=1):
             lines.extend(
                 [
-                    f"### 句对 {index}",
+                    f"### ?? {index}",
                     f"- 相似度：{pair.get('similarity', 0.0)}",
                     f"- 演变强度：{pair.get('evolution_intensity', 0.0)}%（{pair.get('strength_label', '低')}）",
                     f"> 旧稿：{pair.get('old_sentence', '')}",
@@ -391,7 +447,7 @@ class AnalysisResultFormatter:
             sections.extend(
                 [
                     "",
-                    f"### 说明 {index}",
+                    f"### ?? {index}",
                     "```text",
                     note,
                     "```",
@@ -406,18 +462,51 @@ class AnalysisResultFormatter:
         for index, note in enumerate(notes, start=1):
             cards.append(
                 '<div class="note-card">'
-                f'<div class="note-card-title">说明 {index}</div>'
+                f'<div class="note-card-title">?? {index}</div>'
                 f'<pre class="note-pre">{escape(note)}</pre>'
                 '</div>'
             )
         return self._build_page("导入提示说明", "".join(cards))
+
+    def _format_analysis_route_markdown(self, result: dict[str, Any]) -> list[str]:
+        route_text = build_analysis_route_text(result)
+        message = str(result.get("analysis_route_message", "") or "").strip()
+        warnings = [str(item).strip() for item in result.get("analysis_route_warnings", []) if str(item).strip()]
+
+        sections = [f"- {route_text}"]
+        if message:
+            sections.append(f"- 路由状态：{message}")
+        sections.extend(f"- 模式提示：{warning}" for warning in warnings[:3])
+        return sections
+
+    def _build_html_route_panel(self, result: dict[str, Any]) -> str:
+        route_text = build_analysis_route_text(result)
+        message = str(result.get("analysis_route_message", "") or "").strip()
+        warnings = [str(item).strip() for item in result.get("analysis_route_warnings", []) if str(item).strip()]
+        items = [f"<li>{escape(route_text)}</li>"]
+        if message:
+            items.append(f"<li>{escape(message)}</li>")
+        items.extend(f"<li>{escape(warning)}</li>" for warning in warnings[:3])
+        return (
+            '<section class="panel route-panel">'
+            '<h3>模式路由</h3>'
+            f'<ul class="finding-list">{"".join(items)}</ul>'
+            '</section>'
+        )
 
     def _format_bullets(self, items: list[str], empty_text: str) -> list[str]:
         if not items:
             return [f"- {empty_text}"]
         return [f"- {item}" for item in items]
 
-    def _build_cover_page(self, title: str, subtitle: str, rendered_at: str, badge_label: str) -> str:
+    def _build_cover_page(
+        self,
+        title: str,
+        subtitle: str,
+        rendered_at: str,
+        badge_label: str,
+        run_mode_label: str = "离线分析",
+    ) -> str:
         return (
             "<section class=\"page cover-page\">"
             "<div class=\"cover-shell\">"
@@ -427,7 +516,7 @@ class AnalysisResultFormatter:
             f"<p class=\"cover-subtitle\">{escape(subtitle)}</p>"
             "<div class=\"cover-meta\">"
             f"<span>生成时间：{escape(rendered_at)}</span>"
-            "<span>运行模式：彻底离线</span>"
+            f"<span>运行模式：{escape(run_mode_label)}</span>"
             "</div>"
             "</div>"
             "</section>"
