@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+﻿﻿from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
@@ -34,6 +34,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.analysis_audit import append_analysis_audit_event
+from core.analysis_errors import (
+    build_analysis_error_markdown,
+    build_analysis_error_result,
+    build_analysis_error_status_text,
+    build_analysis_error_text,
+    coerce_analysis_error_info,
+)
 from core.analysis_router import (
     ANALYSIS_MODE_HYBRID as ROUTE_MODE_HYBRID,
     ANALYSIS_MODE_OFFLINE as ROUTE_MODE_OFFLINE,
@@ -1274,14 +1282,25 @@ class MainWindow(QMainWindow):
         if route_message:
             self.status_label.setText(route_message)
             self.statusBar().showMessage(f"{route_text} {route_message}", 6000)
+        self._record_audit_event("analysis_completed", result=self._build_result_export_payload())
         self._update_export_state()
 
-    def _on_error_occurred(self, message: str) -> None:
-        self._last_result = None
+    def _on_error_occurred(self, payload: Any) -> None:
+        error_info = coerce_analysis_error_info(payload, default_mode=self.config.analysis_mode)
+        status_text = build_analysis_error_status_text(error_info)
+        message_text = build_analysis_error_text(error_info)
+
+        self._last_result = build_analysis_error_result(
+            error_info,
+            import_preview_notes=self._inserted_preview_hint_notes,
+        )
+        self._refresh_result_view()
         self._update_export_state()
-        self.result_view.setMarkdown(f"# 分析失败\n\n{message}")
+        self.status_label.setText(status_text)
+        self.statusBar().showMessage(status_text, 8000)
         self.output_tab_widget.setCurrentIndex(0)
-        QMessageBox.warning(self, "分析失败", message)
+        self._record_audit_event("analysis_failed", result=self._build_result_export_payload(), error=error_info)
+        QMessageBox.warning(self, error_info.title, message_text)
 
     def _on_thread_finished(self) -> None:
         self._set_busy_state(False)
@@ -1300,6 +1319,28 @@ class MainWindow(QMainWindow):
         self.export_markdown_button.setEnabled(export_enabled)
         self.export_html_button.setEnabled(export_enabled)
         self.export_json_button.setEnabled(export_enabled)
+
+    def _record_audit_event(
+        self,
+        event_type: str,
+        *,
+        result: dict[str, Any] | None = None,
+        error: Any | None = None,
+        export_format: str = "",
+        export_path: str = "",
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            append_analysis_audit_event(
+                event_type,
+                result=result,
+                error=error,
+                export_format=export_format,
+                export_path=export_path,
+                extra=extra,
+            )
+        except Exception:
+            pass
 
     def _export_markdown(self) -> None:
         if self._last_result is None:
@@ -1397,3 +1438,4 @@ class MainWindow(QMainWindow):
             self._analysis_thread.wait(1500)
 
         event.accept()
+

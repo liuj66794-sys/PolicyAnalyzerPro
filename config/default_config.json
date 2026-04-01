@@ -1,48 +1,8 @@
-{
+﻿{
   "app_name": "PolicyAnalyzerPro",
   "model_dir": "models/hfl/chinese-roberta-wwm-ext",
   "font_path": "assets/fonts/simhei.ttf",
   "custom_dictionary_path": "assets/dicts/custom_words.txt",
-  "tfidf_top_k": 15,
-  "textrank_top_k": 15,
-  "sentence_similarity_lower": 0.7,
-  "sentence_similarity_upper": 0.95,
-  "weakening_ratio_threshold": 0.8,
-  "process_pool_workers": 1,
-  "torch_num_threads": 2,
-  "local_files_only": true,
-  "enable_model_trial_load_check": true,
-  "enable_model_warmup_benchmark_check": true,
-  "model_benchmark_batch_size": 4,
-  "model_acceptable_load_ms": 8000.0,
-  "model_acceptable_warmup_ms": 2500.0,
-  "model_acceptable_single_encode_ms": 700.0,
-  "model_acceptable_batch_encode_ms": 2200.0,
-  "model_acceptable_batch_item_ms": 550.0,
-  "model_benchmark_samples": [
-    "加快建设现代化产业体系，发展新质生产力。",
-    "着力扩大国内需求，推动消费和投资更好结合。",
-    "深入推进绿色低碳转型，积极稳妥推进碳达峰碳中和。",
-    "更大力度保障和改善民生，兜牢基层三保底线。"
-  ],
-  "enable_pdf_ocr": true,
-  "ocr_languages": "chi_sim+eng",
-  "tesseract_cmd": "D:\\chapter1\\tools\\ocr-env\\Library\\bin\\tesseract.exe",
-  "pdf_ocr_zoom": 2.0,
-  "pdf_ocr_max_pages": 20,
-  "offline_env": {
-    "HF_HUB_OFFLINE": "1",
-    "TRANSFORMERS_OFFLINE": "1"
-  },
-  "historical_baseline_terms": [
-    "高质量发展",
-    "新发展格局",
-    "中国式现代化",
-    "乡村振兴",
-    "共同富裕",
-    "依法治国",
-    "新质生产力"
-  ],
   "political_stopwords": [
     "中国",
     "全国",
@@ -76,10 +36,61 @@
     "切实",
     "扎实"
   ],
+  "historical_baseline_terms": [
+    "高质量发展",
+    "新发展格局",
+    "中国式现代化",
+    "乡村振兴",
+    "共同富裕",
+    "依法治国"
+  ],
+  "noise_patterns": [
+    "^\\s*新华社.*(?:电|讯)\\s*$",
+    "^\\s*(央视网消息|人民网.*|中新网.*|经济日报.*|人民日报.*)\\s*$",
+    "^\\s*(来源|责任编辑|编辑|记者|作者|审核|校对)[:：].*$",
+    "^\\s*(原标题|编者按|导读)[:：].*$",
+    "^\\s*点击(?:查看更多|进入专题).*$",
+    "^\\s*[【\\[].*(?:打印|关闭窗口|返回顶部|责任编辑).*[】\\]]\\s*$"
+  ],
+  "inline_noise_patterns": [
+    "新华社(?:北京|上海|广州|深圳|[^\\s]{0,10})?\\d{0,2}月?\\d{0,2}日?电",
+    "(?:责任编辑|编辑|审核|校对)[:：][^\\n]+",
+    "【(?:打印|关闭窗口|返回顶部)】",
+    "\\((?:完|记者[^\\)]{0,20})\\)"
+  ],
+  "tfidf_top_k": 15,
+  "textrank_top_k": 15,
+  "sentence_similarity_lower": 0.7,
+  "sentence_similarity_upper": 0.95,
+  "weakening_ratio_threshold": 0.8,
+  "process_pool_workers": 1,
+  "torch_num_threads": 2,
+  "local_files_only": true,
+  "enable_model_trial_load_check": true,
+  "enable_model_warmup_benchmark_check": true,
+  "model_benchmark_batch_size": 4,
+  "model_acceptable_load_ms": 8000.0,
+  "model_acceptable_warmup_ms": 2500.0,
+  "model_acceptable_single_encode_ms": 700.0,
+  "model_acceptable_batch_encode_ms": 2200.0,
+  "model_acceptable_batch_item_ms": 550.0,
+  "model_benchmark_samples": [
+    "加快建设现代化产业体系，发展新质生产力。",
+    "着力扩大国内需求，推动消费和投资更好结合。",
+    "深入推进绿色低碳转型，积极稳妥推进碳达峰碳中和。",
+    "更大力度保障和改善民生，兜牢基层三保底线。"
+  ],
+  "enable_pdf_ocr": true,
+  "ocr_languages": "chi_sim+eng",
+  "tesseract_cmd": "",
+  "pdf_ocr_zoom": 2.0,
+  "pdf_ocr_max_pages": 20,
   "enable_ocr_result_cache": true,
   "ocr_cache_dir": "cache/ocr",
   "analysis_mode": "offline",
   "policy_source_enabled": false,
   "llm_provider": "",
+  "remote_llm_enabled": false,
+  "hybrid_mode_enabled": false,
   "cloud_fallback_enabled": false
 }

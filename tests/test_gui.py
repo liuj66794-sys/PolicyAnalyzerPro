@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
 import os
@@ -254,6 +254,28 @@ class GuiInteractionTests(unittest.TestCase):
         self.assertIn("\u5f85\u9644\u52a0\u8bf4\u660e", result_text)
         self.assertIn("\u8f7b\u63d0\u793a", result_text)
 
+    def test_mode_specific_error_payload_renders_isolated_failure_state(self) -> None:
+        payload = {
+            "mode": "online",
+            "title": "在线分析失败",
+            "user_message": "在线能力骨架尚未启用正式 Provider。",
+            "stage": "capability_check",
+            "requested_mode": "online",
+            "executed_mode": "online",
+        }
+
+        with patch("ui.main_window.QMessageBox.warning") as warning_mock:
+            self.window._on_error_occurred(payload)
+            self.app.processEvents()
+
+        rendered = self.window.result_view.toPlainText()
+        self.assertIn("在线分析失败", rendered)
+        self.assertIn("在线能力骨架尚未启用正式 Provider。", rendered)
+        warning_mock.assert_called_once()
+        self.assertEqual(warning_mock.call_args.args[1], "在线分析失败")
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

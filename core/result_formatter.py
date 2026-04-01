@@ -1,15 +1,21 @@
-﻿from __future__ import annotations
+﻿﻿from __future__ import annotations
 
 import json
 from datetime import datetime
 from html import escape
 from typing import Any
 
+from core.analysis_errors import (
+    coerce_analysis_error_info,
+    get_analysis_error_stage_label,
+)
 from core.analysis_router import build_analysis_route_text, get_analysis_mode_label
 
 
 class AnalysisResultFormatter:
     def to_markdown(self, result: dict[str, Any]) -> str:
+        if self._is_error_result(result):
+            return self._format_error_markdown(result)
         mode = result.get("mode")
         if mode == "compare":
             return self._format_compare_markdown(result)
@@ -19,16 +25,20 @@ class AnalysisResultFormatter:
 
     def to_html_report(self, result: dict[str, Any]) -> str:
         rendered_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        mode = result.get("mode")
-        if mode == "compare":
-            title = "PolicyAnalyzerPro - 双篇比对"
-            body = self._format_compare_html(result, rendered_at)
-        elif mode == "batch":
-            title = "PolicyAnalyzerPro - 批量分析"
-            body = self._format_batch_html(result, rendered_at)
+        if self._is_error_result(result):
+            title = "PolicyAnalyzerPro - 分析失败"
+            body = self._format_error_html(result, rendered_at)
         else:
-            title = "PolicyAnalyzerPro - 单篇分析"
-            body = self._format_single_html(result, rendered_at)
+            mode = result.get("mode")
+            if mode == "compare":
+                title = "PolicyAnalyzerPro - 双篇比对"
+                body = self._format_compare_html(result, rendered_at)
+            elif mode == "batch":
+                title = "PolicyAnalyzerPro - 批量分析"
+                body = self._format_batch_html(result, rendered_at)
+            else:
+                title = "PolicyAnalyzerPro - 单篇分析"
+                body = self._format_single_html(result, rendered_at)
 
         return (
             '<!DOCTYPE html>'
@@ -49,7 +59,58 @@ class AnalysisResultFormatter:
     def build_export_base_name(self, result: dict[str, Any]) -> str:
         mode = result.get("mode", "single")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if self._is_error_result(result):
+            return f"policy_analysis_failed_{mode}_{timestamp}"
         return f"policy_analysis_{mode}_{timestamp}"
+
+    def _is_error_result(self, result: dict[str, Any]) -> bool:
+        return str(result.get("analysis_status", "")).strip().lower() == "error" and isinstance(result.get("analysis_error"), dict)
+
+    def _format_error_markdown(self, result: dict[str, Any]) -> str:
+        error_info = coerce_analysis_error_info(result.get("analysis_error", {}))
+        sections = [
+            "# 分析失败报告",
+            "",
+            "## 失败摘要",
+            f"- 任务类型：{self._get_task_mode_label(result.get('mode'))}",
+            f"- 失败标题：{error_info.title}",
+            f"- 失败说明：{error_info.user_message}",
+            f"- 失败阶段：{get_analysis_error_stage_label(error_info.stage)}",
+        ]
+        if error_info.detail and error_info.detail != error_info.user_message:
+            sections.append(f"- 详细信息：{error_info.detail}")
+        sections.extend(["", "## 模式路由"])
+        sections.extend(self._format_analysis_route_markdown(result))
+        note_sections = self._format_import_preview_notes_markdown(result.get("import_preview_notes", []))
+        if note_sections:
+            sections.extend([""] + note_sections)
+        return "\n".join(sections)
+
+    def _format_error_html(self, result: dict[str, Any], rendered_at: str) -> str:
+        error_info = coerce_analysis_error_info(result.get("analysis_error", {}))
+        metric_cards = [
+            ("任务类型", self._get_task_mode_label(result.get("mode"))),
+            ("失败模式", get_analysis_mode_label(result.get("executed_analysis_mode"))),
+            ("失败阶段", get_analysis_error_stage_label(error_info.stage)),
+            ("状态", "失败"),
+        ]
+        return (
+            self._build_cover_page(
+                title="分析失败报告",
+                subtitle=error_info.user_message,
+                rendered_at=rendered_at,
+                badge_label="失败结果",
+                run_mode_label=get_analysis_mode_label(result.get("executed_analysis_mode")),
+            )
+            + self._build_page(
+                "失败摘要",
+                self._build_html_route_panel(result)
+                + self._build_html_metric_cards(metric_cards)
+                + self._build_html_error_panel(error_info),
+                page_class="summary-page",
+            )
+            + self._build_html_import_preview_notes_page(result.get("import_preview_notes", []))
+        )
 
     def _format_single_markdown(self, result: dict[str, Any]) -> str:
         metadata = result.get("metadata", {})
@@ -731,6 +792,29 @@ class AnalysisResultFormatter:
                 "</section>"
             )
         return ''.join(cards)
+
+    def _build_html_error_panel(self, error_info) -> str:
+        items = [
+            f"<li><strong>失败标题：</strong>{escape(error_info.title)}</li>",
+            f"<li><strong>失败说明：</strong>{escape(error_info.user_message)}</li>",
+            f"<li><strong>失败阶段：</strong>{escape(get_analysis_error_stage_label(error_info.stage))}</li>",
+        ]
+        if error_info.detail and error_info.detail != error_info.user_message:
+            items.append(f"<li><strong>详细信息：</strong>{escape(error_info.detail)}</li>")
+        return (
+            '<section class="panel">'
+            '<h3>失败详情</h3>'
+            f'<ul class="finding-list">{"".join(items)}</ul>'
+            '</section>'
+        )
+
+    def _get_task_mode_label(self, mode: Any) -> str:
+        normalized = str(mode or "single").strip().lower()
+        if normalized == "compare":
+            return "双篇比对"
+        if normalized == "batch":
+            return "批量分析"
+        return "单篇分析"
 
     def _build_html_styles(self) -> str:
         return """

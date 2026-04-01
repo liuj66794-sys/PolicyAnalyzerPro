@@ -1,4 +1,4 @@
-﻿param(
+﻿﻿param(
     [string]$Python = "python",
     [switch]$UseVirtualEnv = $false
 )

@@ -1,18 +1,20 @@
-from __future__ import annotations
+﻿﻿from __future__ import annotations
 
 import multiprocessing as mp
 import queue
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 
 from core.algorithms import PolicyReportAnalyzer, initialize_runtime_environment
+from core.analysis_errors import AnalysisExecutionError, build_analysis_error_status_text, coerce_analysis_error_info
 from core.analysis_router import (
     ANALYSIS_MODE_HYBRID,
     ANALYSIS_MODE_OFFLINE,
     ANALYSIS_MODE_ONLINE,
     apply_route_metadata,
+    normalize_analysis_mode,
     resolve_analysis_route,
 )
 from core.config import AppConfig, DEFAULT_CONFIG
@@ -100,10 +102,12 @@ def _run_online_analysis(
     secondary_text: str,
     batch_inputs: list[dict[str, Any]],
     progress_queue: Any,
+    config_data: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    initialize_runtime_environment(_WORKER_CONFIG or DEFAULT_CONFIG)
+    config = _build_runtime_config(config_data)
+    initialize_runtime_environment(config)
     _push_progress(progress_queue, 10, "正在检查在线分析能力")
-    service = OnlineLLMService(_WORKER_CONFIG or DEFAULT_CONFIG)
+    service = OnlineLLMService(config)
     if task_mode == ANALYSIS_MODE_SINGLE:
         response = service.analyze_single(primary_text)
     elif task_mode == ANALYSIS_MODE_COMPARE:
@@ -123,10 +127,12 @@ def _run_hybrid_analysis(
     secondary_text: str,
     batch_inputs: list[dict[str, Any]],
     progress_queue: Any,
+    config_data: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    initialize_runtime_environment(_WORKER_CONFIG or DEFAULT_CONFIG)
+    config = _build_runtime_config(config_data)
+    initialize_runtime_environment(config)
     _push_progress(progress_queue, 10, "正在检查混合分析能力")
-    service = HybridPipelineService(_WORKER_CONFIG or DEFAULT_CONFIG)
+    service = HybridPipelineService(config)
     if task_mode == ANALYSIS_MODE_SINGLE:
         result = service.run_single(primary_text)
     elif task_mode == ANALYSIS_MODE_COMPARE:
@@ -147,7 +153,7 @@ def _run_hybrid_analysis(
 class NLPAnalysisThread(QThread):
     progress_changed = Signal(int, str)
     result_ready = Signal(object)
-    error_occurred = Signal(str)
+    error_occurred = Signal(object)
     status_changed = Signal(str)
 
     def __init__(
@@ -174,69 +180,103 @@ class NLPAnalysisThread(QThread):
         self._cancel_requested = True
 
     def run(self) -> None:
+        requested_mode = normalize_analysis_mode(self.analysis_mode or self.config.analysis_mode)
+
         if self.mode == ANALYSIS_MODE_BATCH:
             if not self.batch_inputs:
-                self.error_occurred.emit("批量分析至少需要一份有效文本。")
+                self._emit_analysis_error(
+                    AnalysisExecutionError(
+                        mode=requested_mode,
+                        stage="validation",
+                        category="input",
+                        user_message="批量分析至少需要一份有效文本。",
+                    ),
+                    requested_mode=requested_mode,
+                    executed_mode=requested_mode,
+                    stage="validation",
+                )
                 return
         else:
             if not self.primary_text.strip():
-                self.error_occurred.emit("请输入待分析文本。")
+                self._emit_analysis_error(
+                    AnalysisExecutionError(
+                        mode=requested_mode,
+                        stage="validation",
+                        category="input",
+                        user_message="请输入待分析文本。",
+                    ),
+                    requested_mode=requested_mode,
+                    executed_mode=requested_mode,
+                    stage="validation",
+                )
                 return
             if self.mode == ANALYSIS_MODE_COMPARE and not self.secondary_text.strip():
-                self.error_occurred.emit("双篇比对需要同时提供旧稿和新稿。")
+                self._emit_analysis_error(
+                    AnalysisExecutionError(
+                        mode=requested_mode,
+                        stage="validation",
+                        category="input",
+                        user_message="双篇比对需要同时提供旧稿和新稿。",
+                    ),
+                    requested_mode=requested_mode,
+                    executed_mode=requested_mode,
+                    stage="validation",
+                )
                 return
 
         if self.mode not in {ANALYSIS_MODE_SINGLE, ANALYSIS_MODE_COMPARE, ANALYSIS_MODE_BATCH}:
-            self.error_occurred.emit(f"不支持的分析任务类型：{self.mode}")
+            self._emit_analysis_error(
+                AnalysisExecutionError(
+                    mode=requested_mode,
+                    stage="validation",
+                    category="input",
+                    user_message=f"不支持的分析任务类型：{self.mode}",
+                ),
+                requested_mode=requested_mode,
+                executed_mode=requested_mode,
+                stage="validation",
+            )
             return
 
-        decision = resolve_analysis_route(self.analysis_mode, config=self.config)
-        if decision.degraded:
-            self.status_changed.emit(decision.message)
-        else:
-            self.status_changed.emit(decision.message)
-
-        context = mp.get_context("spawn")
         manager = None
         executor = None
         future = None
+        progress_queue = None
+        decision = None
+        current_stage = "routing"
 
         try:
-            manager = context.Manager()
-            progress_queue = manager.Queue()
-            executor = ProcessPoolExecutor(
-                max_workers=1,
-                mp_context=context,
-                initializer=_worker_initializer,
-                initargs=(self.config.to_dict(),),
-            )
+            decision = resolve_analysis_route(self.analysis_mode, config=self.config)
+            self.status_changed.emit(decision.message)
 
+            current_stage = "initialization"
             if decision.executed_mode == ANALYSIS_MODE_OFFLINE:
                 self.status_changed.emit("正在初始化离线分析引擎")
+                context = mp.get_context("spawn")
+                manager = context.Manager()
+                progress_queue = manager.Queue()
+                executor = ProcessPoolExecutor(
+                    max_workers=1,
+                    mp_context=context,
+                    initializer=_worker_initializer,
+                    initargs=(self.config.to_dict(),),
+                )
                 future = self._submit_offline_job(executor, progress_queue)
-            elif decision.executed_mode == ANALYSIS_MODE_ONLINE:
-                self.status_changed.emit("正在初始化在线分析链路")
-                future = executor.submit(
-                    _run_online_analysis,
-                    self.mode,
-                    self.primary_text,
-                    self.secondary_text,
-                    self.batch_inputs,
-                    progress_queue,
-                )
+                self.status_changed.emit("离线分析任务已提交到后台进程")
             else:
-                self.status_changed.emit("正在初始化混合分析链路")
-                future = executor.submit(
-                    _run_hybrid_analysis,
-                    self.mode,
-                    self.primary_text,
-                    self.secondary_text,
-                    self.batch_inputs,
-                    progress_queue,
+                if decision.executed_mode == ANALYSIS_MODE_ONLINE:
+                    self.status_changed.emit("正在初始化在线分析链路")
+                else:
+                    self.status_changed.emit("正在初始化混合分析链路")
+                progress_queue = queue.Queue()
+                executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="policy-remote-analysis",
                 )
+                future = self._submit_remote_job(executor, decision.executed_mode, progress_queue)
+                self.status_changed.emit("远程分析任务已提交到后台线程")
 
-            self.status_changed.emit("分析任务已提交到后台子进程")
-
+            current_stage = "execution"
             while True:
                 self._drain_progress_queue(progress_queue)
                 if future.done():
@@ -250,12 +290,21 @@ class NLPAnalysisThread(QThread):
                 self.msleep(80)
 
             self._drain_progress_queue(progress_queue)
+            current_stage = "result"
             result = future.result()
             self.result_ready.emit(apply_route_metadata(result, decision))
             self.status_changed.emit("分析任务完成")
         except Exception as exc:
-            self.error_occurred.emit(f"分析任务失败：{exc}")
-            self.status_changed.emit("分析任务完成")
+            executed_mode = decision.executed_mode if decision is not None else requested_mode
+            degraded = bool(decision.degraded) if decision is not None else False
+            payload = self._emit_analysis_error(
+                exc,
+                requested_mode=requested_mode,
+                executed_mode=executed_mode,
+                stage=current_stage,
+                degraded=degraded,
+            )
+            self.status_changed.emit(build_analysis_error_status_text(payload))
         finally:
             if executor is not None:
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -268,6 +317,53 @@ class NLPAnalysisThread(QThread):
         if self.mode == ANALYSIS_MODE_COMPARE:
             return executor.submit(_run_compare_analysis, self.primary_text, self.secondary_text, progress_queue)
         return executor.submit(_run_batch_analysis, self.batch_inputs, progress_queue)
+
+    def _submit_remote_job(
+        self,
+        executor: ThreadPoolExecutor,
+        executed_mode: str,
+        progress_queue: Any,
+    ):
+        if executed_mode == ANALYSIS_MODE_ONLINE:
+            return executor.submit(
+                _run_online_analysis,
+                self.mode,
+                self.primary_text,
+                self.secondary_text,
+                self.batch_inputs,
+                progress_queue,
+                self.config.to_dict(),
+            )
+        return executor.submit(
+            _run_hybrid_analysis,
+            self.mode,
+            self.primary_text,
+            self.secondary_text,
+            self.batch_inputs,
+            progress_queue,
+            self.config.to_dict(),
+        )
+
+    def _emit_analysis_error(
+        self,
+        error: Any,
+        *,
+        requested_mode: str,
+        executed_mode: str,
+        stage: str,
+        degraded: bool = False,
+    ) -> dict[str, Any]:
+        payload = coerce_analysis_error_info(
+            error,
+            requested_mode=requested_mode,
+            executed_mode=executed_mode,
+            task_mode=self.mode,
+            default_mode=executed_mode or requested_mode,
+            default_stage=stage,
+            degraded=degraded,
+        ).to_dict()
+        self.error_occurred.emit(payload)
+        return payload
 
     def _drain_progress_queue(self, progress_queue: Any) -> None:
         while True:

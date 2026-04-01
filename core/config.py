@@ -125,6 +125,8 @@ class AppConfig:
     analysis_mode: str = "offline"
     policy_source_enabled: bool = False
     llm_provider: str = ""
+    remote_llm_enabled: bool = False
+    hybrid_mode_enabled: bool = False
     cloud_fallback_enabled: bool = False
     model_dir: str = "models/hfl/chinese-roberta-wwm-ext"
     font_path: str = "assets/fonts/simhei.ttf"
@@ -182,7 +184,41 @@ class AppConfig:
         if normalized_mode not in {"offline", "online", "hybrid"}:
             normalized_mode = "offline"
         self.analysis_mode = normalized_mode
+
+        self.policy_source_enabled = bool(self.policy_source_enabled)
         self.llm_provider = str(self.llm_provider or "").strip()
+        self.remote_llm_enabled = bool(self.remote_llm_enabled)
+        self.hybrid_mode_enabled = bool(self.hybrid_mode_enabled)
+        self.cloud_fallback_enabled = bool(self.cloud_fallback_enabled)
+
+        # Legacy compatibility: old configs only had `cloud_fallback_enabled`.
+        # If the new remote switches are both still false, treat the legacy flag
+        # as a backfill for both online and hybrid capability switches.
+        if (
+            self.cloud_fallback_enabled
+            and not self.remote_llm_enabled
+            and not self.hybrid_mode_enabled
+        ):
+            self.remote_llm_enabled = True
+            self.hybrid_mode_enabled = True
+
+    @property
+    def allows_remote_llm(self) -> bool:
+        return bool(self.remote_llm_enabled)
+
+    @property
+    def allows_hybrid_mode(self) -> bool:
+        return bool(self.remote_llm_enabled and self.hybrid_mode_enabled)
+
+    @property
+    def remote_config_priority(self) -> dict[str, Any]:
+        return {
+            "analysis_mode": self.analysis_mode,
+            "remote_llm_enabled": self.remote_llm_enabled,
+            "hybrid_mode_enabled": self.hybrid_mode_enabled,
+            "cloud_fallback_enabled": self.cloud_fallback_enabled,
+            "llm_provider_configured": bool(self.llm_provider),
+        }
 
     @property
     def resolved_model_dir(self) -> str:

@@ -1,9 +1,11 @@
-﻿import os
+import os
 import shutil
 import unittest
 from pathlib import Path
 
 from core.algorithms import PolicyReportAnalyzer
+from core.analysis_audit import append_analysis_audit_event, get_analysis_audit_log_path
+from core.analysis_errors import build_analysis_error_result
 from core.config import load_app_config
 from core.import_preview import (
     ImportPreviewState,
@@ -93,6 +95,8 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(config.analysis_mode, "offline")
         self.assertFalse(config.policy_source_enabled)
         self.assertEqual(config.llm_provider, "")
+        self.assertFalse(config.remote_llm_enabled)
+        self.assertFalse(config.hybrid_mode_enabled)
         self.assertFalse(config.cloud_fallback_enabled)
         self.assertEqual(config.process_pool_workers, 1)
         self.assertEqual(config.offline_env["HF_HUB_OFFLINE"], "1")
@@ -582,6 +586,65 @@ class SmokeTests(unittest.TestCase):
         self.assertIn("self.batch_run_button.clicked.connect(self._start_batch_analysis)", source)
         self.assertIn("def _load_batch_documents(self)", source)
         self.assertIn("batch_inputs=batch_inputs", source)
+
+
+    def test_formatter_builds_error_markdown_and_json(self) -> None:
+        formatter = AnalysisResultFormatter()
+        error_result = build_analysis_error_result(
+            {
+                "mode": "online",
+                "task_mode": "single",
+                "stage": "capability_check",
+                "title": "\u5728\u7ebf\u5206\u6790\u5931\u8d25",
+                "user_message": "\u5728\u7ebf\u80fd\u529b\u9aa8\u67b6\u5c1a\u672a\u542f\u7528\u6b63\u5f0f Provider\u3002",
+                "requested_mode": "online",
+                "executed_mode": "online",
+            }
+        )
+
+        markdown = formatter.to_markdown(error_result)
+        html = formatter.to_html_report(error_result)
+        json_text = formatter.to_json_text(error_result)
+
+        self.assertIn("# \u5206\u6790\u5931\u8d25\u62a5\u544a", markdown)
+        self.assertIn("\u5931\u8d25\u9636\u6bb5\uff1a\u80fd\u529b\u68c0\u67e5", markdown)
+        self.assertIn("\u5206\u6790\u6a21\u5f0f\uff1a\u5728\u7ebf\u5206\u6790", markdown)
+        self.assertIn("PolicyAnalyzerPro - \u5206\u6790\u5931\u8d25", html)
+        self.assertIn("\u5728\u7ebf\u5206\u6790\u5931\u8d25", html)
+        self.assertIn('"analysis_status": "error"', json_text)
+        self.assertIn('"stage": "capability_check"', json_text)
+
+    def test_analysis_audit_writes_failure_event_with_mode_and_stage(self) -> None:
+        temp_root = Path("tests/_tmp_audit")
+        temp_root.mkdir(parents=True, exist_ok=True)
+        previous = os.environ.get("POLICY_ANALYZER_AUDIT_DIR")
+        os.environ["POLICY_ANALYZER_AUDIT_DIR"] = str(temp_root)
+        try:
+            error_result = build_analysis_error_result(
+                {
+                    "mode": "hybrid",
+                    "task_mode": "single",
+                    "stage": "execution",
+                    "title": "??????",
+                    "user_message": "????????",
+                    "requested_mode": "hybrid",
+                    "executed_mode": "hybrid",
+                }
+            )
+            append_analysis_audit_event("analysis_failed", result=error_result)
+            log_path = get_analysis_audit_log_path()
+            self.assertTrue(log_path.exists())
+            content = log_path.read_text(encoding="utf-8")
+            self.assertIn('"event_type": "analysis_failed"', content)
+            self.assertIn('"analysis_error_mode": "hybrid"', content)
+            self.assertIn('"analysis_error_stage": "execution"', content)
+        finally:
+            if previous is None:
+                os.environ.pop("POLICY_ANALYZER_AUDIT_DIR", None)
+            else:
+                os.environ["POLICY_ANALYZER_AUDIT_DIR"] = previous
+            if temp_root.exists():
+                shutil.rmtree(temp_root)
 
 
 if __name__ == "__main__":

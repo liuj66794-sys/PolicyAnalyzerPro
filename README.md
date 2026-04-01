@@ -1,4 +1,4 @@
-﻿# PolicyAnalyzerPro
+# PolicyAnalyzerPro
 
 ## 项目简介
 
@@ -11,6 +11,21 @@ PolicyAnalyzerPro is an offline-first desktop analyzer for long-form government 
 - 支持长文本导入、清洗、分析和正式报告导出
 - 在进入业务功能前先完成部署自检，尽量把环境问题前置暴露
 - 利用 Python 3.13+ 运行时优化，提升性能和用户体验
+
+## Project Navigation
+
+If the goal is to find the real application code quickly, read these files first instead of scanning the root directory at random:
+
+1. [main.py](/D:/chapter1/main.py): app entry point
+2. [ui/main_window.py](/D:/chapter1/ui/main_window.py): main UI and task triggers
+3. [importers/document_loader.py](/D:/chapter1/importers/document_loader.py): TXT / DOCX / PDF / OCR import path
+4. [core/nlp_thread.py](/D:/chapter1/core/nlp_thread.py): background analysis execution
+5. [core/algorithms.py](/D:/chapter1/core/algorithms.py): offline analysis core
+6. [core/result_formatter.py](/D:/chapter1/core/result_formatter.py): result shaping and export
+7. [docs/PROJECT_MAP.md](/D:/chapter1/docs/PROJECT_MAP.md): full project map
+8. [core/README.md](/D:/chapter1/core/README.md): `core/` responsibility guide
+
+Directories such as `build/`, `dist/`, `tmp/`, `.venv/`, `.pip-cache/`, `python313/`, and `_wheel_probe/` are usually not where product logic lives.
 
 ## 核心能力
 
@@ -34,12 +49,16 @@ PolicyAnalyzerPro is an offline-first desktop analyzer for long-form government 
 
 ## Config Extensions
 
-The default config now includes the fields below for three-mode routing and future extensions:
+The default config now uses the fields below for three-mode routing and clearer priority rules:
 
-- `analysis_mode`: `offline | online | hybrid`, default `offline`
-- `policy_source_enabled`: enables the policy source skeleton
+- `analysis_mode`: `offline | online | hybrid`, only expresses the requested mode, default `offline`
+- `remote_llm_enabled`: global switch for any remote LLM capability; `online` and `hybrid` both require this to be `true`
+- `hybrid_mode_enabled`: extra switch for `hybrid`; even if remote LLM is enabled, hybrid still stays off until this is `true`
 - `llm_provider`: placeholder provider selection for online analysis
-- `cloud_fallback_enabled`: allows online or hybrid mode to attempt remote capability
+- `policy_source_enabled`: enables the policy source skeleton
+- `cloud_fallback_enabled`: legacy compatibility alias; only kept so old configs can still backfill the new remote switches
+
+Priority order is now: `analysis_mode` chooses the requested route, `remote_llm_enabled` decides whether any remote route is allowed at all, `hybrid_mode_enabled` only gates the hybrid route, and `llm_provider` decides whether the selected remote route is actually configurable.
 
 ## 技术栈
 
@@ -79,7 +98,7 @@ D:\chapter1\models\hfl\chinese-roberta-wwm-ext
 
 3. **按需配置 OCR**
 
-If you need scanned PDF OCR, configure `tesseract_cmd` and `ocr_languages` in [config/default_config.json](config/default_config.json). If you later want to try online or hybrid mode, configure `analysis_mode`, `llm_provider`, `cloud_fallback_enabled`, and `policy_source_enabled` in the same file.
+If you need scanned PDF OCR, configure `tesseract_cmd` and `ocr_languages` in [config/default_config.json](config/default_config.json). If you later want to try online or hybrid mode, configure `analysis_mode`, `remote_llm_enabled`, `hybrid_mode_enabled`, `llm_provider`, and `policy_source_enabled` in the same file. `cloud_fallback_enabled` should only be treated as a legacy compatibility key.
 
 4. **启动程序**
 
