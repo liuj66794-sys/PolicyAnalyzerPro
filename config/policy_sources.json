@@ -1,0 +1,63 @@
+﻿{
+  "sources": [
+    {
+      "source_id": "sample-rss-policy",
+      "name": "示例 RSS 政策源",
+      "enabled": false,
+      "source_kind": "rss",
+      "schedule": "daily",
+      "base_url": "https://example.gov.cn/rss.xml",
+      "incremental_strategy": "published_at",
+      "request_timeout_sec": 20,
+      "retry_times": 2,
+      "options": {
+        "feed_url": "https://example.gov.cn/rss.xml"
+      },
+      "notes": "任务3示例配置，占位用。启用前请替换为真实政策 RSS 源。"
+    },
+    {
+      "source_id": "sample-json-policy",
+      "name": "示例 JSON 政策源",
+      "enabled": false,
+      "source_kind": "json_api",
+      "schedule": "daily",
+      "base_url": "https://example.gov.cn/api/policies",
+      "incremental_strategy": "published_at",
+      "request_timeout_sec": 20,
+      "retry_times": 2,
+      "options": {
+        "api_url": "https://example.gov.cn/api/policies",
+        "items_path": "items",
+        "field_mapping": {
+          "policy_id": "id",
+          "title": "title",
+          "content": "content",
+          "source_url": "url",
+          "published_at": "published_at"
+        }
+      },
+      "notes": "任务3示例配置，占位用。启用前请替换为真实政策 JSON 接口。"
+    },
+    {
+      "source_id": "sample-html-policy",
+      "name": "示例 HTML 政策源",
+      "enabled": false,
+      "source_kind": "html_list_detail",
+      "schedule": "daily",
+      "base_url": "https://example.gov.cn/policies/",
+      "list_fetch_strategy": "regex_list",
+      "detail_fetch_strategy": "regex_detail",
+      "incremental_strategy": "published_at",
+      "request_timeout_sec": 20,
+      "retry_times": 2,
+      "options": {
+        "list_url": "https://example.gov.cn/policies/index.html",
+        "list_item_pattern": "<a class=\"policy-link\" href=\"(?<url>[^\"]+)\" data-date=\"(?<published_at>[^\"]*)\">(?<title>.*?)</a>",
+        "detail_title_pattern": "<h1>(?<value>.*?)</h1>",
+        "detail_published_at_pattern": "<time>(?<value>.*?)</time>",
+        "detail_content_pattern": "<article>(?<value>[\\s\\S]*?)</article>"
+      },
+      "notes": "任务3示例配置，占位用。启用前请替换为真实政策 HTML 列表与正文规则。"
+    }
+  ]
+}
