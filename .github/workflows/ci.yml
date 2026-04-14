@@ -53,4 +53,5 @@ jobs:
     if: always()
     steps:
       - name: Summary
-        run: echo "Test result: ${{ needs.test.result }}"
+        run: |
+          echo "Test result: ${{ needs.test.result }}"
